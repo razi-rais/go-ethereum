@@ -28,6 +28,7 @@ package keystore
 import (
 	"bytes"
 	"crypto/aes"
+	"crypto/ecdsa"
 	crand "crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
@@ -36,6 +37,7 @@ import (
 	"io/ioutil"
 	"path/filepath"
 
+	"github.com/ethereum/go-ethereum/accounts"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/math"
 	"github.com/ethereum/go-ethereum/crypto"
@@ -95,6 +97,35 @@ func (ks keyStorePassphrase) GetKey(addr common.Address, filename, auth string) 
 func StoreKey(dir, auth string, scryptN, scryptP int) (common.Address, error) {
 	_, a, err := storeNewKey(&keyStorePassphrase{dir, scryptN, scryptP}, crand.Reader, auth)
 	return a.Address, err
+}
+
+// StoreKeyAndGetPublicKey generates a key, encrypts with 'auth' and stores in the given directory.
+// It returns public key and the account.
+func StoreKeyAndGetPublicKey(dir, auth string, scryptN, scryptP int) (ecdsa.PublicKey, accounts.Account, error) {
+	key, a, err := storeNewKey(&keyStorePassphrase{dir, scryptN, scryptP}, crand.Reader, auth)
+	return key.PrivateKey.PublicKey, a, err
+}
+
+// GetPublicKey retrieves the public key associated with an account using
+// its address, keyfile and passphrase.
+func GetPublicKey(addr common.Address, fileName string, auth string) (ecdsa.PublicKey, error) {
+	publicKey := ecdsa.PublicKey{}
+	// Load the key from the keystore and decrypt its contents
+	keyjson, err := ioutil.ReadFile(fileName)
+	if err != nil {
+		return publicKey, err
+	}
+	key, err := DecryptKey(keyjson, auth)
+	if err != nil {
+		return publicKey, err
+	}
+	// Make sure we're really operating on the requested key (no swap attacks)
+	if key.Address != addr {
+		return publicKey, fmt.Errorf("key content mismatch: have account %x, want %x", key.Address, addr)
+	}
+
+	publicKey = key.PrivateKey.PublicKey
+	return publicKey, err
 }
 
 func (ks keyStorePassphrase) StoreKey(filename string, key *Key, auth string) error {

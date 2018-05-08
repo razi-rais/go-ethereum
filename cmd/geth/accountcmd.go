@@ -17,12 +17,14 @@
 package main
 
 import (
+	"encoding/hex"
 	"fmt"
 	"io/ioutil"
 
 	"github.com/ethereum/go-ethereum/accounts"
 	"github.com/ethereum/go-ethereum/accounts/keystore"
 	"github.com/ethereum/go-ethereum/cmd/utils"
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/console"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/log"
@@ -153,6 +155,22 @@ For non-interactive use the passphrase can be specified with the --password flag
 
 Since only one password can be given, only format update can be performed,
 changing your password is only possible interactively.
+`,
+			},
+			{
+				Name:      "publickey",
+				Usage:     "Print public key of an existing account",
+				Action:    utils.MigrateFlags(revealPublicKey),
+				ArgsUsage: "",
+				Description: `
+    geth account publickey
+
+Print the public key (in hex format) that is associated with an existing account.
+You need to provide account address (in hex), its passphrase, and 
+full path to the keyfile.
+
+Note: 
+Currently all input parameters need to be provided interactively.
 `,
 			},
 			{
@@ -290,6 +308,7 @@ func ambiguousAddrRecovery(ks *keystore.KeyStore, err *keystore.AmbiguousAddrErr
 }
 
 // accountCreate creates a new account into the keystore defined by the CLI flags.
+// It also displays the account public key, keyfile location and its address.
 func accountCreate(ctx *cli.Context) error {
 	cfg := gethConfig{Node: defaultNodeConfig()}
 	// Load config file.
@@ -307,12 +326,52 @@ func accountCreate(ctx *cli.Context) error {
 
 	password := getPassPhrase("Your new account is locked with a password. Please give a password. Do not forget this password.", true, 0, utils.MakePasswordList(ctx))
 
-	address, err := keystore.StoreKey(keydir, password, scryptN, scryptP)
+	publicKey, account, err := keystore.StoreKeyAndGetPublicKey(keydir, password, scryptN, scryptP)
 
 	if err != nil {
 		utils.Fatalf("Failed to create account: %v", err)
 	}
-	fmt.Printf("Address: {%x}\n", address)
+
+	//Print the addresss, keyfile location and the public key.
+	fmt.Printf("Address: {%x}\n", account.Address)
+	fmt.Printf("Keyfile: {%s}\n", account.URL)
+	fmt.Printf("Public Key: {%s}\n", hex.EncodeToString(crypto.FromECDSAPub(&publicKey)))
+
+	return nil
+}
+func revealPublicKey(ctx *cli.Context) error {
+	printPublicKey()
+	return nil
+}
+
+// revealPublicKey print the public key associated with an account.
+// You need to provide account address in (hex), its passphrase and path to keyfile (.json)
+func printPublicKey() error {
+
+	address, err := console.Stdin.PromptInput("Address (without 0x): ")
+	if err != nil || address == "" {
+		utils.Fatalf("Failed to read address: %v", err)
+	}
+	password, err := console.Stdin.PromptPassword("Passphrase: ")
+	if err != nil || password == "" {
+		utils.Fatalf("Failed to read passphrase: %v", err)
+	}
+	keyFileName, err := console.Stdin.PromptInput("Keyfile: ")
+	if err != nil || keyFileName == "" {
+		utils.Fatalf("Failed to read keyfile location: %v", err)
+	}
+	if !common.IsHexAddress(address) {
+		utils.Fatalf("Address {%x} is an invalid address: %v", address, err)
+	}
+
+	// Specified account is a valid address, try retrieving the public key.
+	account := accounts.Account{Address: common.HexToAddress(address)}
+	pubKey, err := keystore.GetPublicKey(account.Address, keyFileName, password)
+
+	if err != nil {
+		utils.Fatalf("Failed to extract public key: %v", err)
+	}
+	fmt.Printf("Public Key: {%s} \n", hex.EncodeToString(crypto.FromECDSAPub(&pubKey)))
 	return nil
 }
 
@@ -367,7 +426,7 @@ func accountImport(ctx *cli.Context) error {
 		utils.Fatalf("Failed to load the private key: %v", err)
 	}
 	stack, _ := makeConfigNode(ctx)
-	passphrase := getPassPhrase("Your new account is locked with a password. Please give a password. Do not forget this password.", true, 0, utils.MakePasswordList(ctx))
+	passphrase := getPassPhrase("account is locked with a password. Please give a password. Do not forget this password.", true, 0, utils.MakePasswordList(ctx))
 
 	ks := stack.AccountManager().Backends(keystore.KeyStoreType)[0].(*keystore.KeyStore)
 	acct, err := ks.ImportECDSA(key, passphrase)
