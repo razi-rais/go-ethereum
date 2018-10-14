@@ -18,7 +18,7 @@ git clone https://github.com/razi-rais/go-ethereum.git $GOPATH/src/github.com/et
 ### Install 
 ```
 cd $GOPATH/src/github.com/ethereum/go-ethereum 
-install -v ./cmd/geth 
+go install -v ./cmd/geth 
 ```
 
 ### Run
